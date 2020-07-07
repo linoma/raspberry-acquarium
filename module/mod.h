@@ -107,9 +107,6 @@ extern volatile ulong *DMA_REG;
 extern volatile ulong *CLK_REG;
 extern volatile ulong *PWM_REG;
 
-int dma_start(void);
-int dma_stop(void);
-
 int dma_start(int ch);
 int dma_stop(int ch);
 

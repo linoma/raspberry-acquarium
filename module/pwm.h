@@ -27,6 +27,8 @@ extern "C" {
 int add_pwm(int pin,int freq,int duty);
 int pwm_stop(void);
 int pwm_start(void);
+int del_pwm(int pwm);
+int set_pwm(int pwm,int freq,int duty);
 
 #ifdef __cplusplus
 }

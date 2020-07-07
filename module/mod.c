@@ -17,23 +17,12 @@ static struct cdev cdev[2];
 static dev_t devnum;
 static struct class *my_class;
 byte pwm_gpio[] = {4,17,18,27,22,23,24,25};
-static unsigned long long _start,_ss;
+static unsigned long long _start;
 static unsigned long lino,_timer_ticks;
 const int NUM_SERVOS=sizeof(pwm_gpio);
 PWM pwms[8]={0};
 
 #define _NOW *((ulong64 *)&TIMER_REG[1])
-
-int set_pwm(int pwm,int freq,int duty){
-    pwms[pwm].freq = freq;
-    pwms[pwm].duty = duty;
-    pwms[pwm].pulse_width  = (100000/freq);
-    ctl->cb[pwm*4+1].length = 130 * sizeof(ulong);
-    ctl->cb[pwm*4+0].dst = ((GPIO_BASE + GPSET0*4) & 0x00ffffff) | 0x7e000000;			
-    pwms[pwm].start = _NOW;
-    printk(KERN_INFO "enable pwm %d f:%d d:%d l:%d\n",pwm,freq,duty,ctl->cb[pwm*4+1].length);
-    return 0;
-}
 
 int mod_thread(void *data){
 	struct sched_param param = { .sched_priority = 40 };
@@ -115,6 +104,13 @@ static long pwm_ioctl(struct file *file, unsigned int cmd, unsigned long arg){
 		case RPIMOD_IOC_GPIO_LOW:
 		    GPIO_REG[GPCLR0] |= 1 << sel;
 		    return 0;		    
+		case RPIMOD_IOC_GPIO_MODE:
+			{
+				int fnreg = (sel / 10) + GPFSEL0;
+				int fnshft = (sel % 10) * 3;				
+				GPIO_REG[fnreg] = (GPIO_REG[fnreg] & ~(7 << fnshft)) | (1 << fnshft);	
+			}
+		    return 0;		    
 		case RPIMOD_IOC_SETFREQ:		
 			return 0;
 		case RPIMOD_IOC_SETDUTY:
@@ -125,7 +121,7 @@ static long pwm_ioctl(struct file *file, unsigned int cmd, unsigned long arg){
 		    
 		    get_user(freq,p++);
 		    get_user(duty,p++);
-		    add_pwm(1,10,20);
+		    add_pwm(17,10,20);
 		}
 		    return 0;
 	}
@@ -165,7 +161,7 @@ static int pwm_close(struct inode *inod,struct file *fil){
 static ssize_t pwm_write(struct file *filp,const char *user_buf,size_t count,loff_t *f_pos)
 {
 	struct private_data* const pdata = filp->private_data;
-	char buf[128], *p = buf, nl;
+	char buf[128], *p = buf, nl,*pp;
 	int len = pdata->partial_len;
 
 	if (0 == pdata)
@@ -176,16 +172,30 @@ static ssize_t pwm_write(struct file *filp,const char *user_buf,size_t count,lof
 	pdata->partial_len = 0;
 	if (count > sizeof(buf) - len - 1)
 		count = sizeof(buf) - len - 1;
-	if (copy_from_user(buf+len, user_buf, count))
+	if (raw_copy_from_user(buf+len, user_buf, count))
 		return -EFAULT;
 	len += count;
 	buf[len] = '\0';
 	while (p < buf+len) {
-		if (strchr(p, '\n')) {
-			if (sscanf(p, "%d=%d%c", &servo, &cnt, &nl) != 3 || nl != '\n'){
+		if ((pp = strchr(p, '\n'))) {
+			int pwm, freq, duty;			
+			
+			duty = 50;
+			if (sscanf(p,"%d=%d%c", &pwm, &freq, &nl) != 3){
 				pdata->reject_writes = 1;
 				return -EINVAL;				
 			}
+			
+			if(nl == ','){
+				int ii= strchr(p,',');
+				
+				if(sscanf(p+ii,"%d%c",&duty,&nl) != 2 && nl != '\n'){
+					pdata->reject_writes = 1;
+					return -EINVAL;				
+				}
+			}
+			set_pwm(pwm,freq,duty);
+			p = pp + 1;
 		}
 		else if (buf+len - p > 10) {
 			return -EINVAL;
@@ -280,7 +290,7 @@ static void __exit mod_exit(void){
     int i,major;
     
     pwm_stop();
-	dma_stop();
+	dma_stop(0);
     if(my_class){
 	major = MAJOR(devnum);
 	for(i =0;i<2;i++){
@@ -302,14 +312,6 @@ static void __exit mod_exit(void){
 	iounmap(DMA_REG);	  
 	iounmap(CLK_REG);	  
 	iounmap(PWM_REG);	      
-}
-
-int dma_start(void){
-    return dma_start(0);
-}
-
-int dma_stop(void){    
-    return dma_stop(0);
 }
 
 int dma_start(int ch){

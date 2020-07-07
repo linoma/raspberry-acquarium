@@ -53,6 +53,40 @@ static int compare (const void * a, const void * b){
 	return i*-1;
 }
 
+int set_pwm(int pwm,int freq,int duty){
+	int i,n;
+	LPPWM p;
+	
+	for(p=pwms,i=0,n=-1;i<NUM_SERVOS;i++,p++){
+		if(p->pin == pwm){
+			n= i;
+			break;
+		}
+	}
+	if(n==-1) {
+		if(freq && duty)
+			return add_pwm(pwm,freq,duty);
+		return -1;
+	}
+	if(freq == 0 || duty == 0)
+		del_pwm(n);
+    printk(KERN_INFO "enable pwm %d f:%d d:%d l:%d\n",pwm,freq,duty);
+    return 0;
+}
+
+int del_pwm(int pwm){
+	LPPWM p;
+	
+	p = &pwms[pwm];
+	p->used = 0;
+	rearrange_dma_cb();	
+	int fnreg = p->pin / 10 + GPFSEL0;
+	int fnshft = (p->pin % 10) * 3;		
+	GPIO_REG[GPCLR0] = 1 << p->pin;
+	GPIO_REG[fnreg] = (GPIO_REG[fnreg] & ~(7 << fnshft)) | (1 << fnshft);		
+	return 0;
+}
+
 int add_pwm(int pin,int freq,int duty){
 	int i;
 	LPPWM p;
@@ -64,7 +98,7 @@ int add_pwm(int pin,int freq,int duty){
 	if(i>=NUM_SERVOS) return -1;		
 	p = pwms + i;
 	p->used = 1;
-	p->pin = pwm_gpio[pin];
+	p->pin = pin;
     p->freq = freq;
     p->duty = duty;
     p->pulse_width  = (1000000/freq);		
@@ -142,7 +176,7 @@ static int rearrange_dma_cb(void){
 		}
 	}	
 _step_1:	
-	dma_stop();
+	dma_stop(0);
 	pwm_stop();
 	
 	{
@@ -176,7 +210,7 @@ _step_1:
 	}
 	
 	pwm_start();
-	dma_start();
+	dma_start(0);
 _exit:	
 	if(tmp)
 		kfree(tmp);
