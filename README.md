@@ -1,1 +1,1 @@
-# raspberry-acquarium
+# raspberry-aquarium
