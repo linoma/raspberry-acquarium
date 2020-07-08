@@ -70,7 +70,14 @@ int set_pwm(int pwm,int freq,int duty){
 	}
 	if(freq == 0 || duty == 0)
 		del_pwm(n);
-    printk(KERN_INFO "enable pwm %d f:%d d:%d l:%d\n",pwm,freq,duty);
+	else{
+		p = &pwms[n];
+		p->freq = freq;
+		p->duty = duty;
+		p->pulse_width  = (1000000/freq);		
+		rearrange_dma_cb();
+	}
+    printk(KERN_INFO "enable pwm %d f:%d d:%d\n",pwm,freq,duty);
     return 0;
 }
 
@@ -78,12 +85,13 @@ int del_pwm(int pwm){
 	LPPWM p;
 	
 	p = &pwms[pwm];
-	p->used = 0;
+	p->used = 0;	
 	rearrange_dma_cb();	
-	int fnreg = p->pin / 10 + GPFSEL0;
-	int fnshft = (p->pin % 10) * 3;		
+	//int fnreg = p->pin / 10 + GPFSEL0;
+	//int fnshft = (p->pin % 10) * 3;		
 	GPIO_REG[GPCLR0] = 1 << p->pin;
-	GPIO_REG[fnreg] = (GPIO_REG[fnreg] & ~(7 << fnshft)) | (1 << fnshft);		
+	//GPIO_REG[fnreg] = (GPIO_REG[fnreg] & ~(7 << fnshft)) | (1 << fnshft);		
+	memset(p,0,sizeof(PWM));
 	return 0;
 }
 
@@ -125,7 +133,11 @@ static int rearrange_dma_cb(void){
 		if(p->used)
 			nn++;
 	}
-	if(nn == 0) return res;
+	list_size = list_current = 0;
+	if(nn == 0){
+		res = 1;
+		goto _step_1;	
+	}
 	res--;
 	tmp = (struct _tmp*)kmalloc(sizeof(struct _tmp)*nn,GFP_KERNEL);
 	if(tmp == NULL)
@@ -139,8 +151,7 @@ static int rearrange_dma_cb(void){
 		tmp[n]._status = 0;
 		n++;
 	}
-	step = tmp[n-1].duty_cycle;
-	list_size = list_current = 0;
+	step = tmp[n-1].duty_cycle;	
 	if(nn == 1){
 		period=0;
 		cb_push(cb,period,tmp[0].duty_cycle,tmp[0].idx,1,1);
@@ -176,9 +187,10 @@ static int rearrange_dma_cb(void){
 		}
 	}	
 _step_1:	
-	dma_stop(0);
+	dma_stop(DMA_CHANNEL);
 	pwm_stop();
-	
+	if(!list_current)
+		goto _exit;
 	{
 		CB *pcb;
 		ulong l;
@@ -207,10 +219,11 @@ _step_1:
 		}
 		dma_cb--;		
 		dma_cb->next = (uint32_t)ctl->cb;
+		res = 0;
 	}
 	
 	pwm_start();
-	dma_start(0);
+	dma_start(DMA_CHANNEL);
 _exit:	
 	if(tmp)
 		kfree(tmp);
@@ -218,7 +231,6 @@ _exit:
 		kfree(cb);
 	return res;	
 }
-
 
 int pwm_start(void){
     PWM_REG[PWM_CTL] = PWMCTL_CLRF;

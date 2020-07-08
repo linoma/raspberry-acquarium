@@ -16,48 +16,22 @@ static unsigned long ctldatabase;
 static struct cdev cdev[2];
 static dev_t devnum;
 static struct class *my_class;
-byte pwm_gpio[] = {4,17,18,27,22,23,24,25};
 static unsigned long long _start;
 static unsigned long lino,_timer_ticks;
-const int NUM_SERVOS=sizeof(pwm_gpio);
-PWM pwms[8]={0};
+
+PWM pwms[NUM_SERVOS]={0};
 
 #define _NOW *((ulong64 *)&TIMER_REG[1])
 
 int mod_thread(void *data){
 	struct sched_param param = { .sched_priority = 40 };
 	unsigned long long _last,_now,_ss;
-	unsigned long _period;
 
 	sched_setscheduler(current, SCHED_FIFO, &param);	
 	
-	_period = 1000000.0 / 15000;
-	
 	while(1){
-	    usleep_range(_period >> 1,_period);
-	    _now = _NOW;
-	    if((_now - _last) >= _period){
-			struct bcm2708_dma_cb *p;
-			int i;
-			/*,cb = (DMA_REG[DMA_CONBLK_AD] - ((uint32_t)ctl->cb & 0x7fffffff)) / sizeof(ctl->cb[0]);*/
-			LPPWM pp;
-			
-			/*for(pp=pwms,i=0;i<8;i++,pp++){
-				if(pp->pulse_width && (_now - pp->start) >= pp->pulse_width){
-					ctl->cb[i*3].dst = ((GPIO_BASE + GPSET0*4) & 0x00ffffff) | 0x7e000000;
-					pp->start = _now;
-					int cb = (DMA_REG[DMA_CONBLK_AD] - ((uint32_t)ctl->cb & 0x7fffffff)) / sizeof(ctl->cb[0]);
-					//printk(KERN_INFO "dma %d\n",cb);
-				}
-			}*/
-			lino++;
-			_last = _now;
-			if((_now - _ss) >= 1000000){
-				_timer_ticks = lino;
-				lino=0;
-				_ss = _now;
-			}
-		}
+	    usleep_range(100000,100000);
+
 	    if(kthread_should_stop()) 
 			break;
 	}
@@ -93,7 +67,6 @@ ssize_t timer_read(struct file *filp, char __user * buff, size_t count,loff_t * 
 
 static long pwm_ioctl(struct file *file, unsigned int cmd, unsigned long arg){
 	ulong *p,sel;	
-	struct private_data* const pdata = file->private_data;
 	
 	p = (ulong *)arg;		
 	get_user(sel,p++);
@@ -158,8 +131,7 @@ static int pwm_close(struct inode *inod,struct file *fil){
 	return ret;
 }
 
-static ssize_t pwm_write(struct file *filp,const char *user_buf,size_t count,loff_t *f_pos)
-{
+static ssize_t pwm_write(struct file *filp,const char *user_buf,size_t count,loff_t *f_pos){
 	struct private_data* const pdata = filp->private_data;
 	char buf[128], *p = buf, nl,*pp;
 	int len = pdata->partial_len;
@@ -187,9 +159,8 @@ static ssize_t pwm_write(struct file *filp,const char *user_buf,size_t count,lof
 			}
 			
 			if(nl == ','){
-				int ii= strchr(p,',');
-				
-				if(sscanf(p+ii,"%d%c",&duty,&nl) != 2 && nl != '\n'){
+				p = strchr(p,',');			
+				if(sscanf(p+1,"%d%c",&duty,&nl) != 2 && nl != '\n'){
 					pdata->reject_writes = 1;
 					return -EINVAL;				
 				}
@@ -197,9 +168,8 @@ static ssize_t pwm_write(struct file *filp,const char *user_buf,size_t count,lof
 			set_pwm(pwm,freq,duty);
 			p = pp + 1;
 		}
-		else if (buf+len - p > 10) {
+		else if (buf+len - p > 10)
 			return -EINVAL;
-		}
 		else
 			break;
 	}
@@ -218,7 +188,7 @@ static struct file_operations fops[] = {
 };
 
 static int __init mod_init(void){	
-    int err,i,major,s;
+    int err,i,major;
 	dev_t my_device;
 
     lino = _timer_ticks = 0;
@@ -254,10 +224,11 @@ static int __init mod_init(void){
 		my_device = MKDEV(major, i);
 		cdev_init(&cdev[i], &fops[i]);
 		err = cdev_add(&cdev[i], my_device, 1);
-		if (err) 
+		if (err) {
 			pr_info("%s: Failed in adding cdev to subsystem retval:%d\n", __func__, err);
-		else
-			device_create(my_class, NULL, my_device, NULL, "bcm2835_%s",i==0?"usec":"pwm");
+			continue;
+		}
+	    device_create(my_class, NULL, my_device, NULL, "bcm2835_%s",i==0?"usec":"pwm");
     }
 
     mod_object = kobject_create_and_add("mod",NULL);
@@ -281,8 +252,7 @@ static int __init mod_init(void){
 	udelay(10);
 
     //task = kthread_run(mod_thread,NULL,"mod");
-    //set_pwm(1,50,50);
-    //add_pwm(2,50);
+
     return 0;
 }
 
@@ -290,7 +260,7 @@ static void __exit mod_exit(void){
     int i,major;
     
     pwm_stop();
-	dma_stop(0);
+	dma_stop(DMA_CHANNEL);
     if(my_class){
 	major = MAJOR(devnum);
 	for(i =0;i<2;i++){
@@ -316,20 +286,20 @@ static void __exit mod_exit(void){
 
 int dma_start(int ch){
     dma_stop(ch);
-    DMA_REG[DMA_CS] = BCM2708_DMA_INT | BCM2708_DMA_END;
-    DMA_REG[DMA_CONBLK_AD] = (uint32_t)(ctl->cb) & 0x7fffffff;
-    DMA_REG[DMA_DEBUG] = 7;
+    DMA_REG[DMA_CS(ch)] = BCM2708_DMA_INT | BCM2708_DMA_END;
+    DMA_REG[DMA_CONBLK_AD(ch)] = (uint32_t)(ctl->cb) & 0x7fffffff;
+    DMA_REG[DMA_DEBUG(ch)] = 7;
     udelay(10);
-    DMA_REG[DMA_CS] = 0x10880000|BCM2708_DMA_ACTIVE;
+    DMA_REG[DMA_CS(ch)] = 0x10880000|BCM2708_DMA_ACTIVE;
     udelay(10);
     return 0;
 }
 
 int dma_stop(int ch){    
-    DMA_REG[DMA_CS] |= BCM2708_DMA_ABORT;
+    DMA_REG[DMA_CS(ch)] |= BCM2708_DMA_ABORT;
     udelay(100);
-    DMA_REG[DMA_CS] &= ~BCM2708_DMA_ACTIVE;
-    DMA_REG[DMA_CS] |= BCM2708_DMA_RESET;
+    DMA_REG[DMA_CS(ch)] &= ~BCM2708_DMA_ACTIVE;
+    DMA_REG[DMA_CS(ch)] |= BCM2708_DMA_RESET;
     udelay(10);
     return 0;
 }

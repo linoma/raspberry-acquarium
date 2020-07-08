@@ -27,7 +27,7 @@ extern "C" {
 #define GPIO_BASE   		(BCM2708_PERI_BASE + 0x200000)
 #define GPIO_LEN			0xb4
 #define DMA_BASE   			(BCM2708_PERI_BASE + 0x7000)
-#define DMA_LEN				0x40
+#define DMA_LEN				0x1000
 
 #define PWM_BASE			(BCM2708_PERI_BASE + 0x20C000)
 #define PWM_LEN				0x40
@@ -55,12 +55,14 @@ extern "C" {
 #define PWMDMAC_ENAB		(1<<31)
 #define PWMDMAC_THRSHLD		((15<<8)|(15<<0))
 	
-#define DMA_CS				(BCM2708_DMA_CS/4)
-#define DMA_CONBLK_AD		(BCM2708_DMA_ADDR/4)
-#define DMA_DEBUG			(BCM2708_DMA_DEBUG/4)
+#define DMA_CS(a)				((BCM2708_DMA_CS + 0x100*a) /4)
+#define DMA_CONBLK_AD(a)	((BCM2708_DMA_ADDR + 0x100*a) /4)
+#define DMA_DEBUG(a)			  ((BCM2708_DMA_DEBUG + 0x100*a) /4)
 
 #define BCM2708_DMA_END				(1<<1)	// Why is this not in mach/dma.h ?
 #define BCM2708_DMA_NO_WIDE_BURSTS	(1<<26)
+
+#define DMA_CHANNEL 9
 
 typedef unsigned long ULONG;
 typedef unsigned char byte;
@@ -97,9 +99,8 @@ typedef struct _pwm{
 	ulong pulse_width;
 } PWM,*LPPWM;
 
-extern const int NUM_SERVOS;
-extern PWM pwms[8];
-extern byte pwm_gpio[];
+#define NUM_SERVOS 8
+extern PWM pwms[NUM_SERVOS];
 extern struct ctldata_s *ctl;
 extern volatile ulong *TIMER_REG;
 extern volatile ulong *GPIO_REG;
