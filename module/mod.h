@@ -15,6 +15,9 @@
 #include <linux/ioctl.h>
 #include <linux/types.h>
 #include <uapi/linux/sched/types.h>
+#include <linux/interrupt.h> 
+#include <linux/gpio.h>
+#include <linux/proc_fs.h>
 
 #ifndef __MODH__
 #define __MODH__
@@ -55,9 +58,9 @@ extern "C" {
 #define PWMDMAC_ENAB		(1<<31)
 #define PWMDMAC_THRSHLD		((15<<8)|(15<<0))
 	
-#define DMA_CS(a)				((BCM2708_DMA_CS + 0x100*a) /4)
+#define DMA_CS(a)			((BCM2708_DMA_CS + 0x100*a) /4)
 #define DMA_CONBLK_AD(a)	((BCM2708_DMA_ADDR + 0x100*a) /4)
-#define DMA_DEBUG(a)			  ((BCM2708_DMA_DEBUG + 0x100*a) /4)
+#define DMA_DEBUG(a)		((BCM2708_DMA_DEBUG + 0x100*a) /4)
 
 #define BCM2708_DMA_END				(1<<1)	// Why is this not in mach/dma.h ?
 #define BCM2708_DMA_NO_WIDE_BURSTS	(1<<26)
@@ -71,36 +74,47 @@ typedef unsigned long ulong;
 typedef unsigned long long ulong64;
 
 struct ctldata_s {
-  uint32_t pwmdata;
-  ulong *gpiodata;	
+	uint32_t pwmdata;
+	ulong *gpiodata;	
 	struct bcm2708_dma_cb *cb;
 };
 
 struct private_data{
 	char *rd_data;
 	char *partial_cmd;
+	struct fasync_struct *fa;
 	int rd_len;
 	int partial_len;
 	int reject_writes;
 };
 
-typedef struct _pwm{
+typedef struct _gpio_pin{
+	byte pin;
 	union{
 		struct {
-			int enable:1;
-			int used:1;
+			unsigned int enable:1;
+			unsigned int used:1;
+			unsigned int irq:1;
+			unsigned int pwm:1;
 		};
 		ulong status;
+	};	
+	union{
+		struct{
+			word freq;
+			byte duty;
+		};
+		struct{
+			int interrupt;
+			ulong type;
+			ulong pull;	
+		};
 	};
-	byte pin;
-	byte duty;
-	word freq;
-	ulong64 start;
-	ulong pulse_width;
-} PWM,*LPPWM;
+} GPIO_PIN,*LPGPIO_PIN;
 
-#define NUM_SERVOS 8
-extern PWM pwms[NUM_SERVOS];
+#define GPIO_PINS	40
+
+extern LPGPIO_PIN gpio_pin;
 extern struct ctldata_s *ctl;
 extern volatile ulong *TIMER_REG;
 extern volatile ulong *GPIO_REG;

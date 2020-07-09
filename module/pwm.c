@@ -54,27 +54,20 @@ static int compare (const void * a, const void * b){
 }
 
 int set_pwm(int pwm,int freq,int duty){
-	int i,n;
-	LPPWM p;
+	LPGPIO_PIN p;
 	
-	for(p=pwms,i=0,n=-1;i<NUM_SERVOS;i++,p++){
-		if(p->pin == pwm){
-			n= i;
-			break;
-		}
-	}
-	if(n==-1) {
+	p = &gpio_pin[pwm];
+	if(p->pwm == 0) {
 		if(freq && duty)
 			return add_pwm(pwm,freq,duty);
 		return -1;
 	}
 	if(freq == 0 || duty == 0)
-		del_pwm(n);
+		del_pwm(pwm);
 	else{
-		p = &pwms[n];
+		p = &gpio_pin[pwm];
 		p->freq = freq;
 		p->duty = duty;
-		p->pulse_width  = (1000000/freq);		
 		rearrange_dma_cb();
 	}
     printk(KERN_INFO "enable pwm %d f:%d d:%d\n",pwm,freq,duty);
@@ -82,55 +75,52 @@ int set_pwm(int pwm,int freq,int duty){
 }
 
 int del_pwm(int pwm){
-	LPPWM p;
+	LPGPIO_PIN p;
 	
-	p = &pwms[pwm];
+	p = &gpio_pin[pwm];
 	p->used = 0;	
+	p->pwm = 0;
 	rearrange_dma_cb();	
 	//int fnreg = p->pin / 10 + GPFSEL0;
 	//int fnshft = (p->pin % 10) * 3;		
 	GPIO_REG[GPCLR0] = 1 << p->pin;
 	//GPIO_REG[fnreg] = (GPIO_REG[fnreg] & ~(7 << fnshft)) | (1 << fnshft);		
-	memset(p,0,sizeof(PWM));
 	return 0;
 }
 
 int add_pwm(int pin,int freq,int duty){
-	int i;
-	LPPWM p;
+	LPGPIO_PIN p;
 	
-	for(p=pwms,i=0;i<NUM_SERVOS;i++,p++){
-		if(!p->used) 
-			break;
-	}
-	if(i>=NUM_SERVOS) return -1;		
-	p = pwms + i;
+	if(gpio_pin[pin].used) 
+		return -1;		
+	p = gpio_pin + pin;
 	p->used = 1;
 	p->pin = pin;
     p->freq = freq;
     p->duty = duty;
-    p->pulse_width  = (1000000/freq);		
-	ctl->gpiodata[i] = 1 << p->pin;
+    p->pwm = 1;
+    p->irq = 0;
+	ctl->gpiodata[pin] = 1 << p->pin;
 	
 	int fnreg = p->pin / 10 + GPFSEL0;
 	int fnshft = (p->pin % 10) * 3;		
 	GPIO_REG[GPCLR0] = 1 << p->pin;
 	GPIO_REG[fnreg] = (GPIO_REG[fnreg] & ~(7 << fnshft)) | (1 << fnshft);	
-	printk(KERN_INFO "add_pwm p:%d f:%d d:%d i:%d\n",p->pin,freq,duty,i);
+	printk(KERN_INFO "add_pwm p:%d f:%d d:%d\n",p->pin,freq,duty);
 	rearrange_dma_cb();
-	return i;
+	return pin;
 }
 
 static int rearrange_dma_cb(void){
 	int i,n,nn,period,step,res;
 	ulong list_size,list_current;
-	LPPWM p;	
+	LPGPIO_PIN p;	
 	struct _tmp *tmp = NULL;
 	CB *cb = NULL;		
 	
 	res=-1;
-	for(p=pwms,nn = i=0;i<NUM_SERVOS;i++,p++){
-		if(p->used)
+	for(p=gpio_pin,nn = i=0;i<GPIO_PINS;i++,p++){
+		if(p->used && p->pwm)
 			nn++;
 	}
 	list_size = list_current = 0;
@@ -143,11 +133,11 @@ static int rearrange_dma_cb(void){
 	if(tmp == NULL)
 		goto _exit;	
 				
-	for(n=i = 0;i<NUM_SERVOS;i++){
-		if(!pwms[i].used) continue;
+	for(n=i = 0;i<GPIO_PINS;i++){
+		if(!gpio_pin[i].used || !gpio_pin[i].pwm) continue;
 		tmp[n].idx = i;
-		tmp[n].period = pwms[i].pulse_width;
-		tmp[n].duty_cycle = tmp[n].period * pwms[i].duty / 100;
+		tmp[n].period =  (1000000/gpio_pin[i].freq);
+		tmp[n].duty_cycle = tmp[n].period * gpio_pin[i].duty / 100;
 		tmp[n]._status = 0;
 		n++;
 	}
