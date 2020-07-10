@@ -28,7 +28,7 @@ extern "C" {
 
 #define BCM2708_PERI_BASE 	0x20000000
 #define GPIO_BASE   		(BCM2708_PERI_BASE + 0x200000)
-#define GPIO_LEN			0xb4
+#define GPIO_LEN			0x100
 #define DMA_BASE   			(BCM2708_PERI_BASE + 0x7000)
 #define DMA_LEN				0x1000
 
@@ -37,20 +37,24 @@ extern "C" {
 #define CLK_BASE			(BCM2708_PERI_BASE + 0x101000)
 #define CLK_LEN				0xA8
 #define TIMER_BASE 			(BCM2708_PERI_BASE + 0x3000)
-#define TIMER_LEN			0x8
+#define TIMER_LEN			0x1F
 
 #define GPFSEL0				(0x00/4)
 #define GPFSEL1				(0x04/4)
 #define GPSET0				(0x1c/4)
 #define GPCLR0				(0x28/4)
+#define GPAFEN0				(0x88/4)
+#define GPAREN0				(0x7C/4)
 
 #define PWM_CTL				(0x00/4)
 #define PWM_STA				(0x04/4)
 #define PWM_DMAC			(0x08/4)
 #define PWM_RNG1			(0x10/4)
 #define PWM_FIFO			(0x18/4)
+
 #define PWMCLK_CNTL			40
 #define PWMCLK_DIV			41
+
 #define PWMCTL_MODE1		(1<<1)
 #define PWMCTL_PWEN1		(1<<0)
 #define PWMCTL_CLRF			(1<<6)
@@ -66,6 +70,10 @@ extern "C" {
 #define BCM2708_DMA_NO_WIDE_BURSTS	(1<<26)
 
 #define DMA_CHANNEL 9
+
+#define TIMERCS	0
+#define TIMERCLO	(4/4)
+#define TIMERC0		(0xc/4)
 
 typedef unsigned long ULONG;
 typedef unsigned char byte;

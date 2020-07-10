@@ -11,5 +11,5 @@
 #define RPIMOD_IOC_GPIO_HIGH		_IOW(RPIMOD_MAGIC, 20, ulong *)
 #define RPIMOD_IOC_GPIO_LOW			_IOW(RPIMOD_MAGIC, 21, ulong *)
 #define RPIMOD_IOC_GPIO_MODE		_IOW(RPIMOD_MAGIC, 22, ulong *)
-
+#define RPIMOD_IOC_GPIO_IRQ_STATUS	_IOW(RPIMOD_MAGIC, 30, ulong *)
 #endif

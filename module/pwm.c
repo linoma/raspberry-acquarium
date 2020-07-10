@@ -164,7 +164,7 @@ static int rearrange_dma_cb(void){
 					if(period >= tmp[i].start+tmp[i].duty_cycle){
 						tmp[i]._state=2;
 						ulong pause = tmp[i].period-tmp[i].duty_cycle;
-						cb_push(cb,period,pause,tmp[i].idx,0,i==n);
+						cb_push(cb,period,pause,tmp[i].idx,0,i==nn);
 					}
 					break;
 				case 2:
@@ -197,15 +197,16 @@ _step_1:
 			dma_cb->next = (uint32_t)(dma_cb + 1);			
 			dma_cb->dst    = ((GPIO_BASE + ((pcb->state ? GPSET0 : GPCLR0) * 4)) & 0x00ffffff) | 0x7e000000;			
 			dma_cb++;
-			
-			dma_cb->info   = BCM2708_DMA_NO_WIDE_BURSTS | BCM2708_DMA_WAIT_RESP | BCM2708_DMA_D_DREQ | BCM2708_DMA_PER_MAP(5);
-			dma_cb->src    = (uint32_t)(&ctl->pwmdata) & 0x7fffffff;
-			dma_cb->dst    = ((PWM_BASE + PWM_FIFO*4) & 0x00ffffff) | 0x7e000000;
-			dma_cb->length = sizeof(uint32_t) * (pcb->cycle);
-			dma_cb->stride = 0;
-			dma_cb->next = (uint32_t)(dma_cb + 1);
-			dma_cb++;
-			printk(KERN_INFO "pwm l:%lu %d\n",pcb->cycle,pcb->state);	
+			if(pcb->pause){
+				dma_cb->info   = BCM2708_DMA_NO_WIDE_BURSTS | BCM2708_DMA_WAIT_RESP | BCM2708_DMA_D_DREQ | BCM2708_DMA_PER_MAP(5);
+				dma_cb->src    = (uint32_t)(&ctl->pwmdata) & 0x7fffffff;
+				dma_cb->dst    = ((PWM_BASE + PWM_FIFO*4) & 0x00ffffff) | 0x7e000000;
+				dma_cb->length = sizeof(uint32_t) * pcb->cycle;
+				dma_cb->stride = 0;
+				dma_cb->next = (uint32_t)(dma_cb + 1);
+				dma_cb++;
+			}
+			printk(KERN_INFO "pwm p:%lu l:%lu s:%lu i:%lu\n",pcb->pause,pcb->cycle,pcb->state,pcb->idx);	
 		}
 		dma_cb--;		
 		dma_cb->next = (uint32_t)ctl->cb;

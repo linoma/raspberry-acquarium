@@ -1,4 +1,5 @@
-obj-m := mod.o pwm.o
+obj-m := aquarium.o 
+aquarium-objs := mod.o pwm.o
 
 all:
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) modules

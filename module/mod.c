@@ -14,20 +14,22 @@ static struct task_struct *task;
 static struct kobject *mod_object;
 static struct proc_dir_entry *proc_usec_entry;
 struct ctldata_s *ctl;
-static struct cdev cdev[2];
+static struct cdev cdev;
 static dev_t devnum;
 static struct class *my_class;
 static unsigned long long _start;
 static unsigned long lino,_timer_ticks;
 static struct private_data *private_data = NULL;
 LPGPIO_PIN gpio_pin = NULL;
+static ulong64 irq_status;
 
 #define _NOW *((ulong64 *)&TIMER_REG[1])
 
-irqreturn_t myhandler(int irq, void *dev_id){	
+static irqreturn_t irq_handler(int irq, void *dev_id){	
 	LPGPIO_PIN p = (LPGPIO_PIN)dev_id;
 	
 	printk(KERN_INFO "IRQ %d\n",p->pin);
+	irq_status |=1 << p->pin;
 	if(private_data && private_data->fa)
 		kill_fasync(&(private_data->fa), SIGIO, POLL_IN);
 	return IRQ_HANDLED;
@@ -37,8 +39,7 @@ int mod_thread(void *data){
 	struct sched_param param = { .sched_priority = 40 };
 	unsigned long long _last,_now,_ss;
 
-	sched_setscheduler(current, SCHED_FIFO, &param);	
-	
+	sched_setscheduler(current, SCHED_FIFO, &param);		
 	while(1){
 	    usleep_range(100000,100000);
 
@@ -56,31 +57,21 @@ static ssize_t set_mod(struct kobject *kobj,struct kobj_attribute *attr,const ch
 	return count;
 }
 
-ssize_t timer_read(struct file *filp, char __user * buff, size_t count,loff_t * offset){
-    unsigned long long _now;
-    unsigned long rval;
-	
-    if (count < 1) return 0;
-    _now = _NOW;
-    if(count == 4){
-		rval = (unsigned long)_now;
-		rval = put_user(rval,buff);
-    }
-    else{
-		if(count > 8) count = 8;
-		rval = put_user(_now,buff);
-    }
-    if (rval < 0)
-		return -EFAULT;    
-    return count;
-}
-
 static long pwm_ioctl(struct file *file, unsigned int cmd, unsigned long arg){
 	ulong *p,sel;	
 	
 	p = (ulong *)arg;		
 	get_user(sel,p++);
 	switch(cmd){
+		case RPIMOD_IOC_GPIO_IRQ_STATUS:
+			{
+				p--;
+				sel = (ulong)irq_status;				
+				put_user(sel,p++);
+				sel= (ulong)(irq_status >> 32);
+				put_user(sel,p++);
+			}
+			return 0;
 		case RPIMOD_IOC_GPIO_HIGH:
 		    GPIO_REG[GPSET0] |= 1 << sel;
 		    return 0;
@@ -107,10 +98,11 @@ static long pwm_ioctl(struct file *file, unsigned int cmd, unsigned long arg){
 						gpio_pin[sel].used=1;
 						gpio_pin[sel].irq = 1;
 						gpio_pin[sel].pwm = 0;
-						if(request_irq(gpio_pin[sel].interrupt, myhandler, 0, "GPIO_IRQ", &gpio_pin[sel])){
+						if(request_irq(gpio_pin[sel].interrupt, irq_handler, 0, "GPIO_IRQ", &gpio_pin[sel])){
 							printk(KERN_INFO "Failed Requesting Interrupt Line...");
 							return -1;
-						}				
+						}	
+						GPIO_REG[GPAFEN0] |= 1 << sel;
 						return 0;
 					case 0x101:
 						break;
@@ -145,8 +137,7 @@ static int pwm_open(struct inode *inod, struct file *fil){
 		}
 		memset(private_data, 0, sz);
 		private_data->rd_data = (char *)(private_data + 1);
-		private_data->partial_cmd = &private_data->rd_data[GPIO_PINS*10];	
-		
+		private_data->partial_cmd = &private_data->rd_data[GPIO_PINS*10];			
 	}
 	fil->private_data = private_data;
 	return 0;
@@ -228,29 +219,41 @@ static int pwm_fasync(int fd, struct file *filp, int mode){
 	return 0;
 }
 
-int usec_read_proc(struct file *filp,char *user_buf,size_t count,loff_t *f_pos){
-	int len=0;
-//	len = sprintf(buf,"\n %s\n ",proc_data);
-	return len;
+static int usec_read_proc(struct file *filp,char *buff,size_t count,loff_t *f_pos){
+	unsigned long long _now;
+    unsigned long rval;
+	
+    if (count < 1) return 0;
+    _now = _NOW;
+    if(count == 4){
+		rval = (unsigned long)_now;
+		rval = put_user(rval,buff);
+    }
+    else{
+		if(count > 8) count = 8;
+		rval = put_user(_now,buff);
+    }
+    if (rval < 0)
+		return -EFAULT;    
+    return count;
 }
 
-static struct kobj_attribute mod_attribute=__ATTR(usec,(S_IWUSR|S_IRUSR),show_mod,set_mod);
+static struct kobj_attribute mod_attribute=__ATTR(aquarium,(S_IWUSR|S_IRUSR),show_mod,set_mod);
 
 static struct file_operations fops[] = {
-	{.owner = THIS_MODULE,.read = timer_read,.write = NULL,},
     {.owner = THIS_MODULE,.read = NULL,.write = pwm_write,.unlocked_ioctl = pwm_ioctl,.compat_ioctl = pwm_ioctl,.open=pwm_open,.release=pwm_close,.fasync=pwm_fasync},
     {.owner = THIS_MODULE,.read = usec_read_proc}
 };
 
 static int __init mod_init(void){	
-    int err,i,major;
+    int major;
 	dev_t my_device;
 
     lino = _timer_ticks = 0;
 
 	gpio_pin = (LPGPIO_PIN)__get_free_pages(GFP_KERNEL, 1);
 	if (gpio_pin == 0) {
-		printk(KERN_WARNING "bcm2835: alloc_pages failed\n");
+		printk(KERN_WARNING "aquarium: alloc_pages failed\n");
 		return -EFAULT;
 	}	
 	ctl = (struct ctldata_s *)(gpio_pin + GPIO_PINS);
@@ -270,25 +273,26 @@ static int __init mod_init(void){
 	pwm_stop();
 	dma_stop(DMA_CHANNEL);
 	    
-    err = alloc_chrdev_region(&devnum, 0, 2, "bcm2835");
-    if (err)
-		printk(KERN_ERR "bcm2835_usec cant create chrdev\n");
-    major = MAJOR(devnum);    
-    my_class = class_create(THIS_MODULE, "bcm2835");
-    for(i=0;i<2;i++){
-		my_device = MKDEV(major, i);
-		cdev_init(&cdev[i], &fops[i]);
-		if(cdev_add(&cdev[i], my_device, 1)){
+    if(!alloc_chrdev_region(&devnum, 0, 1, "aquarium")){
+		int err;
+		
+		major = MAJOR(devnum);    
+		my_class = class_create(THIS_MODULE, "aquarium");
+		my_device = MKDEV(major, 0);
+		cdev_init(&cdev, &fops[0]);
+		if((err=cdev_add(&cdev, my_device, 1)))
 			pr_info("%s: Failed in adding cdev to subsystem retval:%d\n", __func__, err);
-			continue;
-		}
-	    device_create(my_class, NULL, my_device, NULL, "bcm2835_%s",i==0?"usec":"pwm");
-    }
+		else
+			device_create(my_class, NULL, my_device, NULL, "aquarium");
+	}
+    else
+		printk(KERN_ERR "aquarium cant create chrdev\n");
 
-    mod_object = kobject_create_and_add("mod",NULL);
+
+    mod_object = kobject_create_and_add("aquarium",NULL);
     if(sysfs_create_file(mod_object,&mod_attribute.attr))
 	    pr_debug("failed to create mod sysfs\n");	
-	if(!(proc_usec_entry = proc_create("usec",0666,0,&fops[2])))
+	if(!(proc_usec_entry = proc_create("usec",0666,0,&fops[1])))
 		pr_debug("failed to create usec procfs\n");	
 	CLK_REG[PWMCLK_CNTL] = 0x5A000000;
 	CLK_REG[PWMCLK_DIV] = 0x5A000000;
@@ -312,29 +316,30 @@ static int __init mod_init(void){
     return 0;
 }
 
-static void __exit mod_exit(void){    
-    int i,major;
-    
+static void __exit mod_exit(void){        
     pwm_stop();
 	dma_stop(DMA_CHANNEL);
     if(my_class){
-		major = MAJOR(devnum);
-		for(i =0;i<2;i++){
-			int dev = MKDEV(major,i);
-			cdev_del(&cdev[i]);
-			device_destroy(my_class,dev);
-		}
+		int major = MAJOR(devnum);
+		int dev = MKDEV(major,0);
+		cdev_del(&cdev);
+		device_destroy(my_class,dev);
 		class_destroy(my_class);
-		unregister_chrdev_region(devnum, 2);	
+		unregister_chrdev_region(devnum, 1);	
+		my_class = NULL;
     }
-    if(proc_usec_entry)
+    if(proc_usec_entry){
 		remove_proc_entry("usec",NULL);
-    if(mod_object)
+		proc_usec_entry=NULL;
+	}
+    if(mod_object){
 		kobject_put(mod_object);
+		mod_object= NULL;
+	}
     if(task)
 		kthread_stop(task);
 	if(gpio_pin){
-		free_pages(gpio_pin, 0);
+		free_pages((ulong)gpio_pin, 0);
 		gpio_pin = NULL;
 	}
     iounmap(TIMER_REG);	
